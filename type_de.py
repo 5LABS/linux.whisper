@@ -28,7 +28,7 @@ KEYMAP = {
     "5": (6, None), "6": (7, None), "7": (8, None), "8": (9, None),
     "9": (10, None), "0": (11, None),
     # Whitespace
-    " ": (57, None), "\t": (15, None), "\n": (28, None),
+    " ": (57, None), "\t": (15, None),
     # Satzzeichen ohne Modifier
     ".": (52, None), ",": (51, None), "-": (53, None),
     "+": (27, None), "#": (43, None), "<": (86, None),

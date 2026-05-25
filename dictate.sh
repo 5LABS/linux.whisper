@@ -46,11 +46,11 @@ elif [[ "$CMD" == "stop" ]]; then
         --no-timestamps \
         --file "$AUDIO_FILE" \
         2>/dev/null \
-        | grep -v '^$' \
-        | sed 's/^\[.*\] //' \
+        | sed 's/^\[.*\]//;s/^(.*)//' \
+        | grep -iv '^\s*\(\(musik\)\|\[music\]\|\[blank_audio\]\|\.\.\.\|♪\)\s*$' \
+        | tr '\n' ' ' \
         | tr -s ' ' \
-        | sed 's/^ //;s/ $//' \
-        | paste -sd ' ')
+        | sed 's/^ //;s/ $//')
 
     rm -f "$AUDIO_FILE"
 
