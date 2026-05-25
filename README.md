@@ -1,6 +1,6 @@
 # Whisper Diktat – Spracherkennung per Tastendruck
 
-Drücke **Super+Space**, sprich, drücke nochmal **Super+Space** – der erkannte Text wird direkt ins aktive Fenster getippt.
+Halte **Super+Space** gedrückt, sprich, lass los – der erkannte Text wird direkt ins aktive Fenster getippt.
 
 Funktioniert auf Ubuntu 26.04 GNOME (Wayland). Läuft vollständig lokal, kein Internet nötig.
 
@@ -83,18 +83,17 @@ EOF
 systemctl --user daemon-reload && systemctl --user enable ydotoold && systemctl --user start ydotoold
 ```
 
-### 8. GNOME-Tastenkürzel einrichten
+### 8. Input-Source-Switching deaktivieren und Hold-Daemon starten
 
 ```bash
 gsettings set org.gnome.desktop.wm.keybindings switch-input-source "['']"
 gsettings set org.gnome.desktop.wm.keybindings switch-input-source-backward "['']"
 
-SHORTCUT="/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/custom0/"
-gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings "['$SHORTCUT']"
-gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:"$SHORTCUT" name 'Whisper Diktat'
-gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:"$SHORTCUT" command '/srv/projects/linux.whisper/dictate.sh'
-gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:"$SHORTCUT" binding '<Super>space'
+cp /srv/projects/linux.whisper/whisper-hold.service ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now whisper-hold
 ```
+
+Der `whisper-hold`-Daemon liest Tastatureingaben direkt über evdev und startet/stoppt die Aufnahme bei Drücken bzw. Loslassen von Super+Space. Kein GNOME-Tastenkürzel nötig.
 
 ---
 
@@ -102,10 +101,10 @@ gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:"$S
 
 | Aktion | Taste |
 |---|---|
-| Aufnahme starten | **Super+Space** |
-| Aufnahme stoppen & Text eintippen | **Super+Space** |
+| Aufnahme starten | **Super+Space** (halten) |
+| Aufnahme stoppen & Text eintippen | **Super+Space** (loslassen) |
 
-Beim Starten erscheint eine Benachrichtigung „Aufnahme läuft...". Nach dem Stoppen transkribiert Whisper die Aufnahme (ca. 5–30 Sekunden je nach Länge) und fügt den Text ins aktive Fenster ein:
+Beim Drücken erscheint eine Benachrichtigung „Aufnahme läuft...". Nach dem Stoppen transkribiert Whisper die Aufnahme (ca. 5–30 Sekunden je nach Länge) und fügt den Text ins aktive Fenster ein:
 
 - **Kurze Texte** (≤ 200 Zeichen): direkt getippt via ydotool – die Zwischenablage wird nicht angefasst.
 - **Lange Texte** (> 200 Zeichen): über Zwischenablage + Ctrl+V eingefügt; der vorherige Clipboard-Inhalt wird danach wiederhergestellt.
