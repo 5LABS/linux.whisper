@@ -58,14 +58,7 @@ if [[ -f "$PID_FILE" ]]; then
         exit 0
     fi
 
-    OLD_CLIP=$(wl-paste --no-newline 2>/dev/null || true)
-    printf '%s' "$TEXT" | wl-copy
-    sleep 0.15
-    YDOTOOL_SOCKET="/run/user/$(id -u)/.ydotool_socket" ydotool key 29:1 47:1 47:0 29:0
-    sleep 0.2
-    if [[ -n "$OLD_CLIP" ]]; then
-        printf '%s' "$OLD_CLIP" | wl-copy
-    fi
+    YDOTOOL_SOCKET="/run/user/$(id -u)/.ydotool_socket" ydotool type --key-delay 20 -- "$TEXT"
 
     notify "Whisper Diktat" "$TEXT"
     rm -f "$LOCK_FILE"
