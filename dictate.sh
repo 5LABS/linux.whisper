@@ -1,0 +1,73 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WHISPER_BIN="$SCRIPT_DIR/whisper.cpp/build/bin/whisper-cli"
+MODEL="$SCRIPT_DIR/models/ggml-small.bin"
+AUDIO_FILE="/tmp/whisper_audio.wav"
+PID_FILE="/tmp/whisper_dictate.pid"
+TYPE_THRESHOLD=200
+
+notify() {
+    notify-send --app-name="Whisper Diktat" --expire-time=3000 "$1" "$2" 2>/dev/null || true
+}
+
+if [[ -f "$PID_FILE" ]]; then
+    PID=$(cat "$PID_FILE")
+    rm -f "$PID_FILE"
+
+    if kill -0 "$PID" 2>/dev/null; then
+        kill "$PID"
+        # kurz warten damit arecord die Datei fertig schreibt
+        sleep 0.3
+    fi
+
+    if [[ ! -f "$AUDIO_FILE" ]] || [[ ! -s "$AUDIO_FILE" ]]; then
+        notify "Whisper Diktat" "Keine Audiodaten aufgenommen."
+        exit 0
+    fi
+
+    notify "Whisper Diktat" "Transkribiere..."
+
+    TEXT=$("$WHISPER_BIN" \
+        --model "$MODEL" \
+        --language de \
+        --no-timestamps \
+        --file "$AUDIO_FILE" \
+        2>/dev/null \
+        | grep -v '^$' \
+        | sed 's/^\[.*\] //' \
+        | tr -s ' ' \
+        | sed 's/^ //;s/ $//' \
+        | paste -sd ' ')
+
+    rm -f "$AUDIO_FILE"
+
+    if [[ -z "$TEXT" ]]; then
+        notify "Whisper Diktat" "Kein Text erkannt."
+        exit 0
+    fi
+
+    sleep 0.3
+    if [[ ${#TEXT} -le $TYPE_THRESHOLD ]]; then
+        printf '%s' "$TEXT" | YDOTOOL_SOCKET="/run/user/$(id -u)/.ydotool_socket" python3 "$SCRIPT_DIR/type_de.py"
+    else
+        OLD_CLIP=$(wl-paste --no-newline 2>/dev/null || true)
+        printf '%s' "$TEXT" | wl-copy
+        sleep 0.15
+        YDOTOOL_SOCKET="/run/user/$(id -u)/.ydotool_socket" ydotool key 29:1 47:1 47:0 29:0
+        sleep 0.2
+        if [[ -n "$OLD_CLIP" ]]; then
+            printf '%s' "$OLD_CLIP" | wl-copy
+        else
+            wl-copy --clear
+        fi
+    fi
+
+    notify "Whisper Diktat" "$TEXT"
+else
+    rm -f "$AUDIO_FILE"
+    arecord -f S16_LE -r 16000 -c 1 -q "$AUDIO_FILE" &
+    echo $! > "$PID_FILE"
+    notify "Whisper Diktat" "🎤 Aufnahme läuft... (Super+Space zum Stoppen)"
+fi
