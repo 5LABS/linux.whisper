@@ -58,7 +58,7 @@ if [[ -f "$PID_FILE" ]]; then
         exit 0
     fi
 
-    YDOTOOL_SOCKET="/run/user/$(id -u)/.ydotool_socket" ydotool type --key-delay 20 -- "$TEXT"
+    printf '%s' "$TEXT" | YDOTOOL_SOCKET="/run/user/$(id -u)/.ydotool_socket" "$SCRIPT_DIR/type_de"
 
     notify "Whisper Diktat" "$TEXT"
     rm -f "$LOCK_FILE"

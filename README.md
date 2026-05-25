@@ -20,7 +20,7 @@ Funktioniert auf Ubuntu 26.04 GNOME (Wayland). Läuft vollständig lokal, kein I
 ### 1. Systempakete installieren
 
 ```bash
-sudo apt install -y git cmake ydotool wl-clipboard
+sudo apt install -y git cmake gcc ydotool
 ```
 
 ### 2. udev-Regel für ydotool anlegen
@@ -58,13 +58,21 @@ ln -sf /srv/projects/linux.whisper/whisper.cpp/models/ggml-small.bin /srv/projec
 
 Das Modell `small` ist ~466 MB groß und liefert sehr gute Ergebnisse für Deutsch.
 
-### 6. Skripte ausführbar machen
+### 6. type_de kompilieren
+
+`type_de` ist ein kleines C-Programm, das Whisper-Text zeichenweise über ydotool eintippt und dabei deutsche Umlaute und Sonderzeichen korrekt auf QWERTZ-Keycodes abbildet.
+
+```bash
+gcc -O2 -o /srv/projects/linux.whisper/type_de /srv/projects/linux.whisper/type_de.c
+```
+
+### 7. Skripte ausführbar machen
 
 ```bash
 chmod +x /srv/projects/linux.whisper/dictate.sh
 ```
 
-### 7. ydotoold als Hintergrunddienst einrichten
+### 8. ydotoold als Hintergrunddienst einrichten
 
 ```bash
 mkdir -p ~/.config/systemd/user
@@ -83,7 +91,7 @@ EOF
 systemctl --user daemon-reload && systemctl --user enable ydotoold && systemctl --user start ydotoold
 ```
 
-### 8. GNOME-Tastenkürzel einrichten
+### 9. GNOME-Tastenkürzel einrichten
 
 ```bash
 gsettings set org.gnome.desktop.wm.keybindings switch-input-source "['']"
@@ -105,12 +113,9 @@ gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:"$S
 | Aufnahme starten | **Super+Space** |
 | Aufnahme stoppen & Text eintippen | **Super+Space** |
 
-Beim ersten Drücken erscheint eine Benachrichtigung „Aufnahme läuft...". Nach dem zweiten Drücken transkribiert Whisper die Aufnahme (ca. 5–30 Sekunden je nach Länge) und fügt den Text ins aktive Fenster ein:
+Beim ersten Drücken erscheint eine Benachrichtigung „Aufnahme läuft...". Nach dem zweiten Drücken transkribiert Whisper die Aufnahme (ca. 5–30 Sekunden je nach Länge) und tippt den Text über `type_de` direkt ins aktive Fenster – inklusive Umlaute, ß und Sonderzeichen.
 
-- **Kurze Texte** (≤ 200 Zeichen): direkt getippt via ydotool – die Zwischenablage wird nicht angefasst.
-- **Lange Texte** (> 200 Zeichen): über Zwischenablage + Ctrl+V eingefügt; der vorherige Clipboard-Inhalt wird danach wiederhergestellt.
-
-Umlaute und Sonderzeichen funktionieren in beiden Varianten korrekt. Hinweis: In Terminal-Fenstern funktioniert Ctrl+V nicht (dort ist Ctrl+Shift+V nötig) – die Clipboard-Variante greift daher am besten in Texteditoren und Browser-Textfeldern.
+Funktioniert in Terminal-Fenstern, Texteditoren, Browsern und allen anderen Anwendungen.
 
 ---
 
@@ -130,7 +135,22 @@ Modell wechseln: in `dictate.sh` die Variable `MODEL` anpassen.
 
 ## Sprache ändern
 
-In `dictate.sh` ist `-l de` für Deutsch gesetzt. Für andere Sprachen einfach den Sprachcode anpassen, z. B. `-l en` für Englisch.
+In `dictate.sh` ist `--language de` für Deutsch gesetzt. Für andere Sprachen einfach den Sprachcode anpassen, z. B. `--language en` für Englisch. Das Keymap in `type_de.c` ist auf deutsches QWERTZ ausgelegt – bei anderen Sprachen ggf. anpassen und neu kompilieren.
+
+---
+
+## Technische Hintergründe: Texteingabe auf GNOME Wayland
+
+Die Texteingabe ist auf GNOME Wayland überraschend schwierig. Zur Dokumentation, was getestet wurde:
+
+| Methode | Ergebnis |
+|---|---|
+| `wtype` | Scheitert: GNOME unterstützt `zwp_virtual_keyboard_v1` nicht |
+| `ydotool type` | Funktioniert, aber Umlaute (ä, ö, ü, ß) werden falsch ausgegeben |
+| `wl-copy` + Ctrl+V | Klappt in Editoren/Browsern, aber nicht im Terminal (dort ist Ctrl+Shift+V nötig) |
+| `type_de` + `ydotool key` | Funktioniert überall – mappt UTF-8 explizit auf QWERTZ-Keycodes |
+
+`type_de` verwendet einen Key-Delay von 20ms, damit Terminal-Eingabepuffer keine Zeichen (insbesondere Leerzeichen) verschlucken.
 
 ---
 
@@ -141,6 +161,12 @@ In `dictate.sh` ist `-l de` für Deutsch gesetzt. Für andere Sprachen einfach d
 systemctl --user status ydotoold
 ```
 Falls der Dienst nicht läuft: `systemctl --user start ydotoold`
+
+**`type_de` fehlt oder ist nicht ausführbar:**
+```bash
+gcc -O2 -o /srv/projects/linux.whisper/type_de /srv/projects/linux.whisper/type_de.c
+chmod +x /srv/projects/linux.whisper/type_de
+```
 
 **Aufnahme startet nicht:**
 ```bash

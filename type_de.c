@@ -112,7 +112,7 @@ static void flush_chunk(int start, int end) {
     argv[0] = "ydotool";
     argv[1] = "key";
     argv[2] = "--key-delay";
-    argv[3] = "6";
+    argv[3] = "20";
     for (int j = 0; j < cnt; j++) argv[4 + j] = args[start + j];
     argv[4 + cnt] = NULL;
     pid_t pid = fork();
