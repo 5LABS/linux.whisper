@@ -58,7 +58,7 @@ if [[ -f "$PID_FILE" ]]; then
 
     sleep 0.3
     if [[ ${#TEXT} -le $TYPE_THRESHOLD ]]; then
-        printf '%s' "$TEXT" | YDOTOOL_SOCKET="/run/user/$(id -u)/.ydotool_socket" python3 "$SCRIPT_DIR/type_de.py"
+        printf '%s' "$TEXT" | YDOTOOL_SOCKET="/run/user/$(id -u)/.ydotool_socket" "$SCRIPT_DIR/type_de"
     else
         OLD_CLIP=$(wl-paste --no-newline 2>/dev/null || true)
         printf '%s' "$TEXT" | wl-copy
