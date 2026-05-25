@@ -7,7 +7,6 @@ MODEL="$SCRIPT_DIR/models/ggml-small.bin"
 AUDIO_FILE="/tmp/whisper_audio.wav"
 PID_FILE="/tmp/whisper_dictate.pid"
 LOCK_FILE="/tmp/whisper_dictate.lock"
-TYPE_THRESHOLD=200
 
 notify() {
     notify-send --app-name="Whisper Diktat" --expire-time=3000 "$1" "$2" 2>/dev/null || true
@@ -48,7 +47,8 @@ if [[ -f "$PID_FILE" ]]; then
         | grep -iv '^\s*\(\(musik\)\|\[music\]\|\[blank_audio\]\|\.\.\.\|♪\)\s*$' \
         | tr '\n' ' ' \
         | tr -s ' ' \
-        | sed 's/^ //;s/ $//')
+        | sed 's/^ //;s/ $//' \
+        || true)
 
     rm -f "$AUDIO_FILE"
 
@@ -58,20 +58,13 @@ if [[ -f "$PID_FILE" ]]; then
         exit 0
     fi
 
-    sleep 0.3
-    if [[ ${#TEXT} -le $TYPE_THRESHOLD ]]; then
-        printf '%s' "$TEXT" | YDOTOOL_SOCKET="/run/user/$(id -u)/.ydotool_socket" "$SCRIPT_DIR/type_de"
-    else
-        OLD_CLIP=$(wl-paste --no-newline 2>/dev/null || true)
-        printf '%s' "$TEXT" | wl-copy
-        sleep 0.15
-        YDOTOOL_SOCKET="/run/user/$(id -u)/.ydotool_socket" ydotool key 29:1 47:1 47:0 29:0
-        sleep 0.2
-        if [[ -n "$OLD_CLIP" ]]; then
-            printf '%s' "$OLD_CLIP" | wl-copy
-        else
-            wl-copy --clear
-        fi
+    OLD_CLIP=$(wl-paste --no-newline 2>/dev/null || true)
+    printf '%s' "$TEXT" | wl-copy
+    sleep 0.15
+    YDOTOOL_SOCKET="/run/user/$(id -u)/.ydotool_socket" ydotool key 29:1 47:1 47:0 29:0
+    sleep 0.2
+    if [[ -n "$OLD_CLIP" ]]; then
+        printf '%s' "$OLD_CLIP" | wl-copy
     fi
 
     notify "Whisper Diktat" "$TEXT"
