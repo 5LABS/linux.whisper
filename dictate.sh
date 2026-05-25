@@ -12,19 +12,7 @@ notify() {
     notify-send --app-name="Whisper Diktat" --expire-time=3000 "$1" "$2" 2>/dev/null || true
 }
 
-CMD="${1:-}"
-
-if [[ "$CMD" == "start" ]]; then
-    rm -f "$AUDIO_FILE"
-    arecord -f S16_LE -r 16000 -c 1 -q "$AUDIO_FILE" &
-    echo $! > "$PID_FILE"
-    notify "Whisper Diktat" "🎤 Aufnahme läuft..."
-
-elif [[ "$CMD" == "stop" ]]; then
-    if [[ ! -f "$PID_FILE" ]]; then
-        exit 0
-    fi
-
+if [[ -f "$PID_FILE" ]]; then
     PID=$(cat "$PID_FILE")
     rm -f "$PID_FILE"
 
@@ -76,8 +64,9 @@ elif [[ "$CMD" == "stop" ]]; then
     fi
 
     notify "Whisper Diktat" "$TEXT"
-
 else
-    echo "Verwendung: $0 start|stop" >&2
-    exit 1
+    rm -f "$AUDIO_FILE"
+    arecord -f S16_LE -r 16000 -c 1 -q "$AUDIO_FILE" &
+    echo $! > "$PID_FILE"
+    notify "Whisper Diktat" "🎤 Aufnahme läuft... (Super+Space zum Stoppen)"
 fi
