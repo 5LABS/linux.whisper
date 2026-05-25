@@ -13,6 +13,8 @@ notify() {
     notify-send --app-name="Whisper Diktat" --expire-time=3000 "$1" "$2" 2>/dev/null || true
 }
 
+trap 'rm -f "$LOCK_FILE"' EXIT
+
 # Transkription läuft noch (Lock ohne PID = busy)
 if [[ -f "$LOCK_FILE" ]] && [[ ! -f "$PID_FILE" ]]; then
     notify "Whisper Diktat" "Transkription läuft noch..."
@@ -42,7 +44,7 @@ if [[ -f "$PID_FILE" ]]; then
         --no-timestamps \
         --file "$AUDIO_FILE" \
         2>/dev/null \
-        | sed 's/^\[.*\]//;s/^(.*)//' \
+        | sed 's/^\[.*\]//;s/^([^)]*)\s*$//' \
         | grep -iv '^\s*\(\(musik\)\|\[music\]\|\[blank_audio\]\|\.\.\.\|♪\)\s*$' \
         | tr '\n' ' ' \
         | tr -s ' ' \
