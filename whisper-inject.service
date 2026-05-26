@@ -1,0 +1,14 @@
+[Unit]
+Description=Whisper Diktat – RemoteDesktop/EIS Injektions-Daemon
+Documentation=https://github.com/ids1024/reis
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/srv/projects/linux.whisper/inject/target/release/whisper-inject daemon
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=graphical-session.target

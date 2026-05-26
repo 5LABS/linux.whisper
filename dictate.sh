@@ -58,7 +58,10 @@ if [[ -f "$PID_FILE" ]]; then
         exit 0
     fi
 
-    printf '%s' "$TEXT" | YDOTOOL_SOCKET="/run/user/$(id -u)/.ydotool_socket" "$SCRIPT_DIR/type_de"
+    if ! "$SCRIPT_DIR/inject/target/release/whisper-inject" <<< "$TEXT"; then
+        notify "Whisper Diktat" "Injektion fehlgeschlagen – läuft whisper-inject.service?"
+        notify-send --app-name="Whisper Diktat" "Fehler" "whisper-inject nicht erreichbar. Bitte 'systemctl --user start whisper-inject.service' ausführen." 2>/dev/null || true
+    fi
 
     notify "Whisper Diktat" "$TEXT"
     rm -f "$LOCK_FILE"

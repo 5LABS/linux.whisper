@@ -1,0 +1,11 @@
+/srv/projects/linux.whisper/inject/target/release/deps/xkbcommon-324312ccd5a7e162.d: /home/giuliano/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xkbcommon-0.9.0/src/lib.rs /home/giuliano/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xkbcommon-0.9.0/src/xkb/mod.rs /home/giuliano/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xkbcommon-0.9.0/src/xkb/compose.rs /home/giuliano/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xkbcommon-0.9.0/src/xkb/ffi.rs /home/giuliano/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xkbcommon-0.9.0/src/xkb/keysyms.rs
+
+/srv/projects/linux.whisper/inject/target/release/deps/libxkbcommon-324312ccd5a7e162.rlib: /home/giuliano/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xkbcommon-0.9.0/src/lib.rs /home/giuliano/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xkbcommon-0.9.0/src/xkb/mod.rs /home/giuliano/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xkbcommon-0.9.0/src/xkb/compose.rs /home/giuliano/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xkbcommon-0.9.0/src/xkb/ffi.rs /home/giuliano/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xkbcommon-0.9.0/src/xkb/keysyms.rs
+
+/srv/projects/linux.whisper/inject/target/release/deps/libxkbcommon-324312ccd5a7e162.rmeta: /home/giuliano/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xkbcommon-0.9.0/src/lib.rs /home/giuliano/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xkbcommon-0.9.0/src/xkb/mod.rs /home/giuliano/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xkbcommon-0.9.0/src/xkb/compose.rs /home/giuliano/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xkbcommon-0.9.0/src/xkb/ffi.rs /home/giuliano/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xkbcommon-0.9.0/src/xkb/keysyms.rs
+
+/home/giuliano/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xkbcommon-0.9.0/src/lib.rs:
+/home/giuliano/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xkbcommon-0.9.0/src/xkb/mod.rs:
+/home/giuliano/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xkbcommon-0.9.0/src/xkb/compose.rs:
+/home/giuliano/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xkbcommon-0.9.0/src/xkb/ffi.rs:
+/home/giuliano/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/xkbcommon-0.9.0/src/xkb/keysyms.rs:

@@ -20,16 +20,10 @@ Funktioniert auf Ubuntu 26.04 GNOME (Wayland). Läuft vollständig lokal, kein I
 ### 1. Systempakete installieren
 
 ```bash
-sudo apt install -y git cmake gcc ydotool
+sudo apt install -y git cmake gcc rustc cargo libxkbcommon-dev alsa-utils
 ```
 
-### 2. udev-Regel für ydotool anlegen
-
-```bash
-echo 'KERNEL=="uinput", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"' | sudo tee /etc/udev/rules.d/80-uinput.rules && sudo udevadm control --reload-rules && sudo udevadm trigger
-```
-
-### 3. Benutzer zur Gruppe `input` hinzufügen
+### 2. Benutzer zur Gruppe `input` hinzufügen (für hold_daemon)
 
 ```bash
 sudo usermod -aG input $USER
@@ -37,7 +31,7 @@ sudo usermod -aG input $USER
 
 Danach **ausloggen und wieder einloggen** (einmalig nötig).
 
-### 4. whisper.cpp klonen und kompilieren
+### 3. whisper.cpp klonen und kompilieren
 
 ```bash
 cd /srv/projects/linux.whisper
@@ -48,7 +42,7 @@ cmake --build whisper.cpp/build -j$(nproc)
 
 Der Compile-Schritt dauert ca. 2–5 Minuten.
 
-### 5. Sprachmodell herunterladen
+### 4. Sprachmodell herunterladen
 
 ```bash
 mkdir -p /srv/projects/linux.whisper/models
@@ -58,40 +52,38 @@ ln -sf /srv/projects/linux.whisper/whisper.cpp/models/ggml-small.bin /srv/projec
 
 Das Modell `small` ist ~466 MB groß und liefert sehr gute Ergebnisse für Deutsch.
 
-### 6. type_de kompilieren
+### 5. whisper-inject kompilieren
 
-`type_de` ist ein kleines C-Programm, das Whisper-Text zeichenweise über ydotool eintippt und dabei deutsche Umlaute und Sonderzeichen korrekt auf QWERTZ-Keycodes abbildet.
+`whisper-inject` ist ein Rust-Programm, das Text über das **XDG RemoteDesktop-Portal** (EIS/libei) ins aktive Fenster tippt – ohne uinput, ohne Root-Rechte, nativ auf GNOME Wayland.
 
 ```bash
-gcc -O2 -o /srv/projects/linux.whisper/type_de /srv/projects/linux.whisper/type_de.c
+cargo build --release --manifest-path /srv/projects/linux.whisper/inject/Cargo.toml
 ```
 
-### 7. Skripte ausführbar machen
+### 6. Skripte ausführbar machen
 
 ```bash
 chmod +x /srv/projects/linux.whisper/dictate.sh
 ```
 
-### 8. ydotoold als Hintergrunddienst einrichten
+### 7. whisper-inject.service als Benutzer-Dienst einrichten
 
 ```bash
 mkdir -p ~/.config/systemd/user
-cat > ~/.config/systemd/user/ydotoold.service << 'EOF'
-[Unit]
-Description=ydotool daemon
-
-[Service]
-ExecStart=/usr/bin/ydotoold
-Restart=always
-
-[Install]
-WantedBy=default.target
-EOF
-
-systemctl --user daemon-reload && systemctl --user enable ydotoold && systemctl --user start ydotoold
+cp /srv/projects/linux.whisper/whisper-inject.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable whisper-inject.service
+systemctl --user start whisper-inject.service
 ```
 
-### 9. GNOME-Tastenkürzel einrichten
+Beim ersten Start erscheint ein **GNOME-Dialog**, der nach der Erlaubnis für Tastatureingaben fragt. Einmal bestätigen – danach startet der Daemon ohne Dialog.
+
+Status prüfen:
+```bash
+systemctl --user status whisper-inject.service
+```
+
+### 8. GNOME-Tastenkürzel einrichten
 
 ```bash
 gsettings set org.gnome.desktop.wm.keybindings switch-input-source "['']"
@@ -113,7 +105,7 @@ gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:"$S
 | Aufnahme starten | **Super+Space** |
 | Aufnahme stoppen & Text eintippen | **Super+Space** |
 
-Beim ersten Drücken erscheint eine Benachrichtigung „Aufnahme läuft...". Nach dem zweiten Drücken transkribiert Whisper die Aufnahme (ca. 5–30 Sekunden je nach Länge) und tippt den Text über `type_de` direkt ins aktive Fenster – inklusive Umlaute, ß und Sonderzeichen.
+Beim ersten Drücken erscheint eine Benachrichtigung „Aufnahme läuft...". Nach dem zweiten Drücken transkribiert Whisper die Aufnahme (ca. 5–30 Sekunden je nach Länge) und tippt den Text direkt ins aktive Fenster – inklusive Umlaute, ß und Sonderzeichen.
 
 Funktioniert in Terminal-Fenstern, Texteditoren, Browsern und allen anderen Anwendungen.
 
@@ -135,7 +127,7 @@ Modell wechseln: in `dictate.sh` die Variable `MODEL` anpassen.
 
 ## Sprache ändern
 
-In `dictate.sh` ist `--language de` für Deutsch gesetzt. Für andere Sprachen einfach den Sprachcode anpassen, z. B. `--language en` für Englisch. Das Keymap in `type_de.c` ist auf deutsches QWERTZ ausgelegt – bei anderen Sprachen ggf. anpassen und neu kompilieren.
+In `dictate.sh` ist `--language de` für Deutsch gesetzt. Für andere Sprachen einfach den Sprachcode anpassen, z. B. `--language en` für Englisch. `whisper-inject` liest die Keymap dynamisch vom XDG-Portal – es funktioniert mit jedem Tastaturlayout automatisch.
 
 ---
 
@@ -148,9 +140,10 @@ Die Texteingabe ist auf GNOME Wayland überraschend schwierig. Zur Dokumentation
 | `wtype` | Scheitert: GNOME unterstützt `zwp_virtual_keyboard_v1` nicht |
 | `ydotool type` | Funktioniert, aber Umlaute (ä, ö, ü, ß) werden falsch ausgegeben |
 | `wl-copy` + Ctrl+V | Klappt in Editoren/Browsern, aber nicht im Terminal (dort ist Ctrl+Shift+V nötig) |
-| `type_de` + `ydotool key` | Funktioniert überall – mappt UTF-8 explizit auf QWERTZ-Keycodes |
+| `NotifyKeyboardKeysym` (XDG-Portal) | API-Aufruf kehrt ohne Fehler zurück, aber GNOME 50 tut nichts |
+| **`whisper-inject` (EIS/libei)** | **Funktioniert überall** – liest Keymap vom EIS-Server, mappt Unicode auf Keycodes |
 
-`type_de` verwendet einen Key-Delay von 20ms, damit Terminal-Eingabepuffer keine Zeichen (insbesondere Leerzeichen) verschlucken.
+`whisper-inject` nutzt das XDG RemoteDesktop-Portal mit EIS (Emulated Input Stream / libei). Die Keymap wird dynamisch vom Portal bezogen, sodass alle Tastaturlayouts und Sonderzeichen (ä, ö, ü, ß, €, …) automatisch korrekt abgebildet werden.
 
 ---
 
@@ -158,14 +151,15 @@ Die Texteingabe ist auf GNOME Wayland überraschend schwierig. Zur Dokumentation
 
 **Kein Text wird eingetippt:**
 ```bash
-systemctl --user status ydotoold
+systemctl --user status whisper-inject.service
 ```
-Falls der Dienst nicht läuft: `systemctl --user start ydotoold`
+Falls der Dienst nicht läuft: `systemctl --user start whisper-inject.service`
 
-**`type_de` fehlt oder ist nicht ausführbar:**
+Falls der Dienst läuft aber kein Text erscheint: prüfen ob GNOME den Portal-Dialog angezeigt hat (einmalige Bestätigung notwendig).
+
+**whisper-inject-Daemon startet nicht:**
 ```bash
-gcc -O2 -o /srv/projects/linux.whisper/type_de /srv/projects/linux.whisper/type_de.c
-chmod +x /srv/projects/linux.whisper/type_de
+journalctl --user -u whisper-inject.service -n 50
 ```
 
 **Aufnahme startet nicht:**
@@ -175,4 +169,4 @@ arecord -l
 Prüfen ob ein Mikrofon aufgelistet wird.
 
 **Shortcut reagiert nicht:**
-In GNOME-Einstellungen unter *Tastatur → Tastaturkürzel → Benutzerdefinierte Tastenkürzel* nachsehen, ob „Whisper Diktat" aufgelistet ist.
+In GNOME-Einstellungen unter *Tastatur → Tastaturkürzel → Benutzerdefinierte Tastaturkürzel* nachsehen, ob „Whisper Diktat" aufgelistet ist.
