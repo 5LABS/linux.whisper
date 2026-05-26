@@ -23,15 +23,7 @@ Funktioniert auf Ubuntu 26.04 GNOME (Wayland). Läuft vollständig lokal, kein I
 sudo apt install -y git cmake gcc rustc cargo libxkbcommon-dev alsa-utils
 ```
 
-### 2. Benutzer zur Gruppe `input` hinzufügen (für hold_daemon)
-
-```bash
-sudo usermod -aG input $USER
-```
-
-Danach **ausloggen und wieder einloggen** (einmalig nötig).
-
-### 3. whisper.cpp klonen und kompilieren
+### 2. whisper.cpp klonen und kompilieren
 
 ```bash
 cd /srv/projects/linux.whisper
@@ -42,7 +34,7 @@ cmake --build whisper.cpp/build -j$(nproc)
 
 Der Compile-Schritt dauert ca. 2–5 Minuten.
 
-### 4. Sprachmodell herunterladen
+### 3. Sprachmodell herunterladen
 
 ```bash
 mkdir -p /srv/projects/linux.whisper/models
@@ -52,7 +44,7 @@ ln -sf /srv/projects/linux.whisper/whisper.cpp/models/ggml-small.bin /srv/projec
 
 Das Modell `small` ist ~466 MB groß und liefert sehr gute Ergebnisse für Deutsch.
 
-### 5. whisper-inject kompilieren
+### 4. whisper-inject kompilieren
 
 `whisper-inject` ist ein Rust-Programm, das Text über das **XDG RemoteDesktop-Portal** (EIS/libei) ins aktive Fenster tippt – ohne uinput, ohne Root-Rechte, nativ auf GNOME Wayland.
 
@@ -60,13 +52,13 @@ Das Modell `small` ist ~466 MB groß und liefert sehr gute Ergebnisse für Deuts
 cargo build --release --manifest-path /srv/projects/linux.whisper/inject/Cargo.toml
 ```
 
-### 6. Skripte ausführbar machen
+### 5. Skripte ausführbar machen
 
 ```bash
 chmod +x /srv/projects/linux.whisper/dictate.sh
 ```
 
-### 7. whisper-inject.service als Benutzer-Dienst einrichten
+### 6. whisper-inject.service als Benutzer-Dienst einrichten
 
 ```bash
 mkdir -p ~/.config/systemd/user
@@ -76,14 +68,14 @@ systemctl --user enable whisper-inject.service
 systemctl --user start whisper-inject.service
 ```
 
-Beim ersten Start erscheint ein **GNOME-Dialog**, der nach der Erlaubnis für Tastatureingaben fragt. Einmal bestätigen – danach startet der Daemon ohne Dialog.
+Beim **ersten Start** erscheint ein GNOME-Dialog, der nach der Erlaubnis für Tastatureingaben fragt. Einmal bestätigen – danach startet der Daemon ohne Dialog (restore_token wird gespeichert).
 
 Status prüfen:
 ```bash
 systemctl --user status whisper-inject.service
 ```
 
-### 8. GNOME-Tastenkürzel einrichten
+### 7. GNOME-Tastenkürzel einrichten
 
 ```bash
 gsettings set org.gnome.desktop.wm.keybindings switch-input-source "['']"
@@ -139,11 +131,11 @@ Die Texteingabe ist auf GNOME Wayland überraschend schwierig. Zur Dokumentation
 |---|---|
 | `wtype` | Scheitert: GNOME unterstützt `zwp_virtual_keyboard_v1` nicht |
 | `ydotool type` | Funktioniert, aber Umlaute (ä, ö, ü, ß) werden falsch ausgegeben |
-| `wl-copy` + Ctrl+V | Klappt in Editoren/Browsern, aber nicht im Terminal (dort ist Ctrl+Shift+V nötig) |
+| `wl-copy` + Ctrl+V | Klappt in Editoren/Browsern, aber nicht im Terminal |
 | `NotifyKeyboardKeysym` (XDG-Portal) | API-Aufruf kehrt ohne Fehler zurück, aber GNOME 50 tut nichts |
 | **`whisper-inject` (EIS/libei)** | **Funktioniert überall** – liest Keymap vom EIS-Server, mappt Unicode auf Keycodes |
 
-`whisper-inject` nutzt das XDG RemoteDesktop-Portal mit EIS (Emulated Input Stream / libei). Die Keymap wird dynamisch vom Portal bezogen, sodass alle Tastaturlayouts und Sonderzeichen (ä, ö, ü, ß, €, …) automatisch korrekt abgebildet werden.
+`whisper-inject` nutzt das XDG RemoteDesktop-Portal mit EIS (Emulated Input Stream / libei). Der Daemon baut beim ersten Start eine Portal-Session auf (einmaliger Dialog), speichert den `restore_token` und startet danach dialogfrei. Text wird per XKB-Keymap-Lookup auf Evdev-Keycodes abgebildet und über das EIS-Protokoll an den Compositor übergeben.
 
 ---
 
@@ -155,9 +147,13 @@ systemctl --user status whisper-inject.service
 ```
 Falls der Dienst nicht läuft: `systemctl --user start whisper-inject.service`
 
-Falls der Dienst läuft aber kein Text erscheint: prüfen ob GNOME den Portal-Dialog angezeigt hat (einmalige Bestätigung notwendig).
+Falls der Dienst läuft aber kein Text erscheint: prüfen ob GNOME den Portal-Dialog angezeigt hat (einmalige Bestätigung notwendig). Token löschen und Dienst neu starten erzwingt den Dialog:
+```bash
+rm -f ~/.local/state/whisper-dictate/restore_token
+systemctl --user restart whisper-inject.service
+```
 
-**whisper-inject-Daemon startet nicht:**
+**Daemon-Logs ansehen:**
 ```bash
 journalctl --user -u whisper-inject.service -n 50
 ```

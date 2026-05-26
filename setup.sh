@@ -13,7 +13,7 @@ SHORTCUT_PATH="/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings/
 step() { echo; echo "==> $*"; }
 
 step "Systempakete installieren..."
-sudo apt install -y git cmake gcc rustc cargo libxkbcommon-dev arecord
+sudo apt install -y git cmake gcc rustc cargo libxkbcommon-dev alsa-utils
 
 step "whisper.cpp klonen..."
 if [[ -d "$WHISPER_DIR/.git" ]]; then
