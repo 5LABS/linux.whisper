@@ -10,7 +10,6 @@
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream as StdUnixStream;
 use std::path::PathBuf;
-use std::sync::mpsc;
 
 use anyhow::{Context, Result, bail};
 use ashpd::desktop::{
@@ -18,12 +17,15 @@ use ashpd::desktop::{
     remote_desktop::{ConnectToEISOptions, DeviceType, RemoteDesktop, SelectDevicesOptions},
 };
 use enumflags2::BitFlags;
+use futures::StreamExt;
 use reis::{
     ei,
     event::{DeviceCapability, EiEvent},
+    tokio::EiConvertEventStream,
 };
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
+use tokio::sync::mpsc::{self, UnboundedReceiver};
 use xkbcommon::xkb;
 
 #[tokio::main]
@@ -70,7 +72,7 @@ fn save_token(token: &str) -> Result<()> {
 }
 
 // ---------------------------------------------------------------------------
-// EIS-Worker (läuft im Blocking-Thread, kein tokio, kein Send-Problem)
+// EIS-Worker (eigener Thread mit eigenem current-thread tokio-Runtime)
 // ---------------------------------------------------------------------------
 
 /// Keymap-Zustand für Zeichensuche.
@@ -96,7 +98,6 @@ impl KeymapState {
         let keysym = xkb::Keysym::from_char(ch);
         let all = self.keymap.min_keycode().raw()..=self.keymap.max_keycode().raw();
         for i in all {
-            // level 0 = ohne Shift, level 1 = mit Shift
             for level in 0u32..=1 {
                 let syms = self.keymap.key_get_syms_by_level(
                     xkb::Keycode::new(i),
@@ -119,125 +120,134 @@ enum Inject {
     Shutdown,
 }
 
-/// EIS-Worker-Thread: hält die EI-Verbindung und tippt Text, wenn er
-/// über den Kanal empfangen wird.
-fn eis_worker(
+/// EIS-Worker-Einstiegspunkt: läuft in eigenem Blocking-Thread mit frischem
+/// current-thread tokio-Runtime (vermeidet Send-Anforderung für !Send xkb-Typen).
+fn eis_worker(eis_stream: StdUnixStream, rx: UnboundedReceiver<Inject>) -> Result<()> {
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .build()
+        .context("Tokio-Runtime konnte nicht erstellt werden")?;
+    rt.block_on(eis_worker_async(eis_stream, rx))
+}
+
+/// Asynchroner EIS-Worker: handhabt Handshake, Setup und Text-Injektion.
+/// Läuft ausschließlich auf einem Thread (current_thread-Runtime), daher
+/// können !Send-Typen wie xkb::Keymap problemlos verwendet werden.
+async fn eis_worker_async(
     eis_stream: StdUnixStream,
-    rx: mpsc::Receiver<Inject>,
+    mut rx: UnboundedReceiver<Inject>,
 ) -> Result<()> {
     let context = ei::Context::new(eis_stream).context("EIS-Context erstellen")?;
-    // Handshake synchron durchführen
-    let (conn, mut events) = context
-        .handshake_blocking("whisper-inject", ei::handshake::ContextType::Sender)
+
+    // handshake_tokio liest über EiEventStream, der pending_event() VOR
+    // poll_read_ready() prüft – verhindert den Deadlock der blockierenden Version.
+    let (conn, mut events): (_, EiConvertEventStream) = context
+        .handshake_tokio("whisper-inject", ei::handshake::ContextType::Sender)
+        .await
         .context("EIS-Handshake fehlgeschlagen")?;
 
     let mut keymap_state: Option<KeymapState> = None;
-    // Das Keyboard-Interface für Tastatureingaben
     let mut keyboard_iface: Option<ei::Keyboard> = None;
-    // Das Device für start_emulating / frame
     let mut keyboard_device: Option<ei::Device> = None;
     let mut sequence: u32 = 0;
-    let mut ready = false; // true sobald Keyboard-Device bereit ist
+    let mut ready = false;
 
-    // Seat-/Device-Setup-Phase: Ereignisse verarbeiten bis das Keyboard-Device
-    // vollständig initialisiert ist.
-    for result in &mut events {
-        let event = result.context("EIS-Ereignis")?;
-        match &event {
-            EiEvent::SeatAdded(evt) => {
-                evt.seat.bind_capabilities(DeviceCapability::Keyboard.into());
-                context.flush().context("EIS flush nach bind")?;
-            }
-            EiEvent::DeviceAdded(evt) => {
-                if evt.device.has_capability(DeviceCapability::Keyboard) {
-                    // Keymap aus dem Device lesen
-                    if let Some(km) = evt.device.keymap() {
-                        let xkb_ctx = xkb::Context::new(0);
-                        let keymap = unsafe {
-                            xkb::Keymap::new_from_fd(
-                                &xkb_ctx,
-                                km.fd.try_clone().context("Keymap-FD klonen")?,
-                                km.size as usize,
-                                xkb::KEYMAP_FORMAT_TEXT_V1,
-                                0,
-                            )
-                        }
-                        .context("xkb::Keymap::new_from_fd fehlgeschlagen")?
-                        .context("Keymap war None")?;
-                        keymap_state = Some(KeymapState::new(keymap));
-                    }
-                    keyboard_iface = evt.device.interface::<ei::Keyboard>();
-                    keyboard_device = Some(evt.device.device().clone());
-                }
-            }
-            EiEvent::DeviceResumed(_) => {
-                if keyboard_device.is_some() {
-                    ready = true;
-                    break; // Setup abgeschlossen
-                }
-            }
-            _ => {}
-        }
-    }
-
-    if !ready {
-        bail!("EIS-Keyboard-Device wurde nicht bereit (Setup-Phase abgebrochen)");
-    }
-
-    let km = keymap_state.as_ref().context("Keine Keymap vom EIS-Server erhalten")?;
-    let kbd = keyboard_iface.as_ref().context("Kein EIS-Keyboard-Interface")?;
-    let dev = keyboard_device.as_ref().context("Kein EIS-Device")?;
-
-    // Inject-Schleife: auf Text-Anfragen warten, zwischendurch EIS-Pings beantworten
+    // Kombinierte Schleife: EIS-Events (Setup + Pings) und Inject-Anfragen
+    // werden gleichzeitig behandelt.
     loop {
-        // Nicht-blockierend prüfen ob neue EIS-Ereignisse da sind (Pings etc.)
-        // Der Iterator blockiert nur wenn nötig – wir machen es nicht-blockierend
-        // durch ein kurzes recv_timeout und gelegentliches context.read().
-        //
-        // Einfachste korrekte Lösung: nach jedem gesendeten Text kurz flushen.
-        // Pings werden über EiConvertEventIterator automatisch beantwortet.
+        tokio::select! {
+            biased; // EIS-Events bevorzugen (Pings müssen prompt beantwortet werden)
 
-        match rx.recv() {
-            Ok(Inject::Text(text)) => {
-                dev.start_emulating(sequence, conn.serial());
-                sequence += 1;
-                context.flush()?;
-
-                for ch in text.chars() {
-                    if ch == '\n' || ch == '\r' {
-                        // Return-Taste: Keycode 28 (Enter) auf Standard-QWERTZ
-                        kbd.key(28, ei::keyboard::KeyState::Press);
-                        kbd.key(28, ei::keyboard::KeyState::Released);
-                        context.flush()?;
-                        continue;
+            maybe_event = events.next() => {
+                match maybe_event {
+                    None => bail!("EIS-Verbindung unerwartet geschlossen"),
+                    Some(Err(e)) => return Err(e.into()),
+                    Some(Ok(event)) => {
+                        match event {
+                            EiEvent::SeatAdded(evt) => {
+                                evt.seat.bind_capabilities(DeviceCapability::Keyboard.into());
+                                context.flush().context("EIS flush nach bind")?;
+                            }
+                            EiEvent::DeviceAdded(evt) => {
+                                if evt.device.has_capability(DeviceCapability::Keyboard) {
+                                    if let Some(km) = evt.device.keymap() {
+                                        let xkb_ctx = xkb::Context::new(0);
+                                        let keymap = unsafe {
+                                            xkb::Keymap::new_from_fd(
+                                                &xkb_ctx,
+                                                km.fd.try_clone().context("Keymap-FD klonen")?,
+                                                km.size as usize,
+                                                xkb::KEYMAP_FORMAT_TEXT_V1,
+                                                0,
+                                            )
+                                        }
+                                        .context("xkb::Keymap::new_from_fd fehlgeschlagen")?
+                                        .context("Keymap war None")?;
+                                        keymap_state = Some(KeymapState::new(keymap));
+                                    } else {
+                                        eprintln!("Warnung: Keyboard-Device ohne Keymap");
+                                    }
+                                    keyboard_iface = evt.device.interface::<ei::Keyboard>();
+                                    keyboard_device = Some(evt.device.device().clone());
+                                }
+                            }
+                            EiEvent::DeviceResumed(_) => {
+                                if keyboard_device.is_some() {
+                                    ready = true;
+                                }
+                            }
+                            _ => {}
+                        }
                     }
-                    if ch == '\t' {
-                        // Tab: Keycode 15
-                        kbd.key(15, ei::keyboard::KeyState::Press);
-                        kbd.key(15, ei::keyboard::KeyState::Released);
-                        context.flush()?;
-                        continue;
-                    }
-                    let Some((keycode, shift)) = km.lookup(ch) else {
-                        eprintln!("Warnung: kein Keycode für '{ch}' gefunden, überspringe");
-                        continue;
-                    };
-                    if shift {
-                        kbd.key(km.shift_keycode - 8, ei::keyboard::KeyState::Press);
-                    }
-                    kbd.key(keycode, ei::keyboard::KeyState::Press);
-                    kbd.key(keycode, ei::keyboard::KeyState::Released);
-                    if shift {
-                        kbd.key(km.shift_keycode - 8, ei::keyboard::KeyState::Released);
-                    }
-                    context.flush()?;
                 }
-
-                dev.frame(conn.serial(), timestamp_us());
-                dev.stop_emulating(conn.serial());
-                context.flush()?;
             }
-            Ok(Inject::Shutdown) | Err(_) => break,
+
+            maybe_inject = rx.recv(), if ready => {
+                match maybe_inject {
+                    None | Some(Inject::Shutdown) => break,
+                    Some(Inject::Text(text)) => {
+                        let km = keymap_state.as_ref().context("Keine Keymap")?;
+                        let kbd = keyboard_iface.as_ref().context("Kein EIS-Keyboard-Interface")?;
+                        let dev = keyboard_device.as_ref().context("Kein EIS-Device")?;
+
+                        dev.start_emulating(sequence, conn.serial());
+                        sequence += 1;
+                        context.flush()?;
+
+                        for ch in text.chars() {
+                            if ch == '\n' || ch == '\r' {
+                                kbd.key(28, ei::keyboard::KeyState::Press);
+                                kbd.key(28, ei::keyboard::KeyState::Released);
+                                context.flush()?;
+                                continue;
+                            }
+                            if ch == '\t' {
+                                kbd.key(15, ei::keyboard::KeyState::Press);
+                                kbd.key(15, ei::keyboard::KeyState::Released);
+                                context.flush()?;
+                                continue;
+                            }
+                            let Some((keycode, shift)) = km.lookup(ch) else {
+                                eprintln!("Warnung: kein Keycode für '{ch}' gefunden, überspringe");
+                                continue;
+                            };
+                            if shift {
+                                kbd.key(km.shift_keycode - 8, ei::keyboard::KeyState::Press);
+                            }
+                            kbd.key(keycode, ei::keyboard::KeyState::Press);
+                            kbd.key(keycode, ei::keyboard::KeyState::Released);
+                            if shift {
+                                kbd.key(km.shift_keycode - 8, ei::keyboard::KeyState::Released);
+                            }
+                            context.flush()?;
+                        }
+
+                        dev.frame(conn.serial(), timestamp_us());
+                        dev.stop_emulating(conn.serial());
+                        context.flush()?;
+                    }
+                }
+            }
         }
     }
 
@@ -324,10 +334,10 @@ async fn run_daemon() -> Result<()> {
         .context("connect_to_eis fehlgeschlagen")?;
     let eis_stream = StdUnixStream::from(eis_fd);
 
-    // --- Kanal für Text-Inject-Anfragen ---
-    let (tx, rx) = mpsc::channel::<Inject>();
+    // --- Kanal für Text-Inject-Anfragen (tokio mpsc, Sender ist Send) ---
+    let (tx, rx) = mpsc::unbounded_channel::<Inject>();
 
-    // EIS-Worker in eigenem Blocking-Thread starten (xkbcommon ist !Send)
+    // EIS-Worker in eigenem Thread mit frischem current-thread Runtime
     let worker_handle = std::thread::spawn(move || {
         if let Err(e) = eis_worker(eis_stream, rx) {
             eprintln!("EIS-Worker Fehler: {e}");
@@ -353,7 +363,6 @@ async fn run_daemon() -> Result<()> {
             continue;
         }
         if tx.send(Inject::Text(text)).is_err() {
-            // EIS-Worker ist abgestürzt
             eprintln!("EIS-Worker nicht mehr erreichbar, beende Daemon.");
             break;
         }

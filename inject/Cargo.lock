@@ -860,6 +860,7 @@ dependencies = [
  "anyhow",
  "ashpd",
  "enumflags2",
+ "futures",
  "reis",
  "tokio",
  "xkbcommon",
